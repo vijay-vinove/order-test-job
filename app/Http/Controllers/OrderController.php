@@ -32,7 +32,13 @@ class OrderController extends Controller
         // Order service to create a new order
 		$order = $this->orderService->createOrder($request->all());
 
-        return response()->json(['success' => 'Order created succesfully']);
+        // check if order placed succesfully
+        if($order) {
+            return response()->json(['success' => 'Order created succesfully']);
+        }else{
+            return response()->json(['error' => 'Some error occured. Please try again laer']);
+        }
+
 
     }
 }

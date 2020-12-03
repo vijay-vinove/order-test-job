@@ -7,6 +7,7 @@ use App\Models\Item;
 use App\Services\Interfaces\OrderServiceInterface;
 use App\Repositories\Interfaces\ProductRepositoryInterface;
 use App\Repositories\Interfaces\OrderRepositoryInterface;
+use DB;
 
 /**
  * order service class to manage the order details
@@ -37,51 +38,74 @@ class OrderService implements OrderServiceInterface
     public function createOrder(array $orderDetails)
     {
 
-        // create order
-		$orderData = [
-			'customer_name' => $orderDetails['order']['customer'],
-			'address' => $orderDetails['order']['address'],
-			'status' => Order::STATE_IN_PROGRESS,
-            'total_price' => $orderDetails['order']['total'],
-			'order_date' => date('Y-m-d')
-		];
+        try{
+            // start database transaction to avoid invalid data in database
+            DB::beginTransaction();
 
-		$order = $this->orderRepository->createOrder($orderData);
+            // create order
+    		$orderData = [
+    			'customer_name' => $orderDetails['order']['customer'],
+    			'address' => $orderDetails['order']['address'],
+    			'status' => Order::STATE_IN_PROGRESS,
+                'total_price' => $orderDetails['order']['total'],
+    			'order_date' => date('Y-m-d')
+    		];
 
-        // check if product already exist
-    	foreach($orderDetails['order']['items'] as $item) {
+    		$order = $this->orderRepository->createOrder($orderData);
 
-    		// find the product by SKU
-    		$product = $this->productRepository->findProductBySKU($item['sku']);
-    		
-    		// create product if does not exist
-    		if(!$product) {
-    			$newProductDetails = [
-    				'sku' => $item['sku'],
-    				'colour' => ''
+            // check if product already exist
+        	foreach($orderDetails['order']['items'] as $item) {
+
+        		// find the product by SKU
+        		$product = $this->productRepository->findProductBySKU($item['sku']);
+        		
+        		// create product if does not exist
+        		if(!$product) {
+        			$newProductDetails = [
+        				'sku' => $item['sku'],
+        				'colour' => ''
+        			];
+        			$product = $this->productRepository->createProduct($newProductDetails);
+        		}
+
+                // Note: As we are not managing inventory for now so I have not added the condition for the in stock or out of stock with the quantity parameter
+
+        		// Item details to be saved
+    			$itemDetails = [
+    				'order_id' => $order->id,
+    				'status' => Item::STATE_ASSIGNED,
+    				'physical_status' => Item::STATE_PHYSICAL_IN_WAREHOUSE,
+    				'quantity' => $item['quantity']
     			];
-    			$product = $this->productRepository->createProduct($newProductDetails);
-    		}
 
-            // Note: As we are not managing inventory for now so I have not added the condition for the in stock or out of stock with the quantity parameter
+    			// conditions to check if item already exist
+    			$itemStatus = [
+    				'product_id' => $product->id,
+    				'status' => Item::STATE_AVAILABLE,
+    			];
 
-    		// Item details to be saved
-			$itemDetails = [
-				'order_id' => $order->id,
-				'status' => Item::STATE_ASSIGNED,
-				'physical_status' => Item::STATE_PHYSICAL_IN_WAREHOUSE,
-				'quantity' => $item['quantity']
-			];
+        		// create a new item if does not exist for the product or update the details if item is available
+        		$this->productRepository->createOrUpdateItem($itemStatus, $itemDetails);
+        	}
 
-			// conditions to check if item already exist
-			$itemStatus = [
-				'product_id' => $product->id,
-				'status' => Item::STATE_AVAILABLE,
-			];
+            // commit the database if no error
+            DB::commit();
 
-    		// create a new item if does not exist for the product or update the details if item is available
-    		$this->productRepository->createOrUpdateItem($itemStatus, $itemDetails);
-    	}
+            return $order->id;
+
+        }catch(\Illuminate\Database\QueryException $ex){ // catch database query exception
+
+            // rollabck all queries if error encountered
+            DB::rollback();
+            return false;
+
+        }catch (\Exception $ex) { // catch other exceptions
+
+            // rollabck all queries if error encountered
+            DB::rollback();
+            return false;
+
+        }
     }
 
 }
